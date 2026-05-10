@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>当下 - The Now</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;500&family=Noto+Sans+SC:wght@300;400&display=swap');
+
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            background-color: #F5F5F0;
+            /* 纸张白 */
+            color: #4A4A4A;
+            /* 岩石灰 */
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .serif {
+            font-family: 'Noto Serif SC', serif;
+        }
+
+        /* 呼吸动画 */
+        @keyframes breathe {
+
+            0%,
+            100% {
+                transform: scale(1);
+                opacity: 0.6;
+            }
+
+            50% {
+                transform: scale(1.5);
+                opacity: 0.3;
+            }
+        }
+
+        .breathing-circle {
+            animation: breathe 8s infinite ease-in-out;
+        }
+
+        /* 念头消散动画 */
+        @keyframes dissipate {
+            0% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+                filter: blur(0);
+            }
+
+            100% {
+                opacity: 0;
+                transform: translateY(-20px) scale(1.1);
+                filter: blur(4px);
+            }
+        }
+
+        .dissipating {
+            animation: dissipate 2s forwards ease-out;
+        }
+
+        /* 隐藏滚动条 */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+
+<body class="h-screen w-full overflow-hidden flex justify-center bg-stone-100" x-data="appData()">
+
+    <!-- 手机容器模拟 -->
+    <div
+        class="w-full h-full max-w-md bg-[#F5F5F0] relative flex flex-col shadow-2xl overflow-hidden sm:rounded-xl sm:h-[90vh] sm:my-auto">
+
+        <!-- 1. 首页 -->
+        <div x-show="currentView === 'home'" x-transition.opacity.duration.500ms
+            class="flex-1 flex flex-col items-center justify-center p-8 relative">
+            <!-- 顶部留白，保持极简 -->
+            <div class="absolute top-12 opacity-30 serif text-xl tracking-widest">当下</div>
+
+            <!-- 三个核心按钮 -->
+            <div class="flex flex-col gap-8 w-full items-center">
+                <button @click="startBreathing()"
+                    class="w-48 h-48 rounded-full bg-stone-200/50 border border-stone-300 flex items-center justify-center shadow-sm active:scale-95 transition-transform duration-300">
+                    <span class="serif text-2xl text-stone-600">呼吸</span>
+                </button>
+
+                <button @click="startObserving()"
+                    class="w-40 h-40 rounded-full bg-stone-200/30 border border-stone-300 flex items-center justify-center shadow-sm active:scale-95 transition-transform duration-300">
+                    <span class="serif text-xl text-stone-600">观察</span>
+                </button>
+
+                <button @click="startScanning()"
+                    class="w-32 h-32 rounded-full bg-stone-200/20 border border-stone-300 flex items-center justify-center shadow-sm active:scale-95 transition-transform duration-300">
+                    <span class="serif text-lg text-stone-600">扫描</span>
+                </button>
+            </div>
+
+            <!-- 数据统计入口 -->
+            <button @click="showStats()"
+                class="absolute bottom-8 right-8 opacity-20 hover:opacity-50 transition-opacity">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24"
+                    stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
+                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+            </button>
+        </div>
+
+        <!-- 2. 呼吸页面 -->
+        <div x-show="currentView === 'breathing'" x-transition.opacity.duration.700ms
+            class="absolute inset-0 bg-[#E8E8E3] flex flex-col items-center justify-center z-20">
+            <div class="relative w-64 h-64 flex items-center justify-center">
+                <!-- 呼吸光圈 -->
+                <div class="absolute inset-0 bg-stone-400 rounded-full opacity-30 breathing-circle"></div>
+                <div class="absolute inset-4 bg-stone-300 rounded-full opacity-30 breathing-circle"
+                    style="animation-delay: 0.5s"></div>
+
+                <!-- 金句 -->
+                <div class="relative z-10 text-center p-6">
+                    <p class="serif text-stone-700 text-lg leading-relaxed opacity-80" x-text="currentQuote"></p>
+                </div>
+            </div>
+            <button @click="currentView = 'home'"
+                class="absolute bottom-12 text-stone-500 text-sm opacity-50">结束练习</button>
+        </div>
+
+        <!-- 3. 观察页面 -->
+        <div x-show="currentView === 'observing'" x-transition.opacity.duration.500ms
+            class="absolute inset-0 bg-[#F5F5F0] flex flex-col p-8 z-20">
+            <div class="mt-12 mb-6 text-center">
+                <p class="serif text-stone-500 text-lg">看着这个念头，不要评判它</p>
+                <p class="text-stone-400 text-xs mt-2">只是写下来，然后释放它</p>
+            </div>
+
+            <div class="flex-1 relative">
+                <textarea x-model="thoughtInput" :class="{'dissipating': isDissipating}"
+                    class="w-full h-full bg-transparent border-none resize-none focus:ring-0 text-stone-700 text-lg leading-relaxed placeholder-stone-300 outline-none"
+                    placeholder="此刻你的脑海里有什么？"></textarea>
+            </div>
+
+            <button @click="releaseThought()" x-show="!isDissipating"
+                class="mb-12 py-4 border border-stone-400 rounded-full text-stone-600 w-full active:bg-stone-200 transition-colors">
+                释放
+            </button>
+            <button x-show="isDissipating" disabled class="mb-12 py-4 text-stone-400 w-full text-sm">
+                正在消散...
+            </button>
+
+            <button @click="currentView = 'home'; thoughtInput=''; isDissipating=false"
+                class="absolute top-8 left-8 text-stone-400">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24"
+                    stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+
+        <!-- 4. 扫描页面 -->
+        <div x-show="currentView === 'scanning'" x-transition.opacity.duration.500ms
+            class="absolute inset-0 bg-[#4A4A4A] text-[#F5F5F0] flex flex-col items-center justify-center z-20">
+            <div class="mb-12 text-center opacity-80">
+                <p class="serif text-2xl mb-2">身体扫描</p>
+                <p class="text-sm font-light">将注意力带回身体</p>
+            </div>
+
+            <!-- 极简播放器 -->
+            <button @click="isPlaying = !isPlaying"
+                class="w-24 h-24 rounded-full border border-[#F5F5F0]/30 flex items-center justify-center hover:bg-[#F5F5F0]/10 transition-colors">
+                <svg x-show="!isPlaying" xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 ml-1" fill="none"
+                    viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
+                        d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
+                        d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <svg x-show="isPlaying" xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none"
+                    viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
+                        d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+            </button>
+            <p class="mt-8 text-xs opacity-40" x-text="isPlaying ? '正在感受当下...' : '点击播放'"></p>
+
+            <button @click="currentView = 'home'; isPlaying=false"
+                class="absolute bottom-12 text-white/30 text-sm">关闭</button>
+        </div>
+
+        <!-- 5. 统计页面 (底部抽屉) -->
+        <div x-show="showStatsModal" style="display: none;" class="absolute inset-0 z-30 flex items-end">
+            <div @click="showStatsModal = false" class="absolute inset-0 bg-black/20 backdrop-blur-sm"></div>
+            <div x-transition:enter="transition ease-out duration-300" x-transition:enter-start="translate-y-full"
+                x-transition:enter-end="translate-y-0"
+                class="bg-white w-full rounded-t-2xl p-8 relative z-10 shadow-2xl">
+                <div class="w-12 h-1 bg-stone-200 rounded-full mx-auto mb-8"></div>
+
+                <h3 class="serif text-xl text-stone-700 mb-6">本周回顾</h3>
+
+                <div class="mb-8">
+                    <p class="text-stone-400 text-sm mb-2">过去7天，你回到了当下</p>
+                    <p class="text-5xl font-light text-stone-600">7 <span class="text-lg text-stone-400">次</span></p>
+                </div>
+
+                <div class="border-t border-stone-100 pt-6">
+                    <p class="text-stone-400 text-sm mb-4">观察记录</p>
+                    <div class="space-y-4 max-h-48 overflow-y-auto no-scrollbar">
+                        <template x-for="record in records" :key="record.id">
+                            <div class="bg-stone-50 p-4 rounded-lg">
+                                <p class="text-stone-600 text-sm" x-text="record.content"></p>
+                                <p class="text-stone-300 text-xs mt-2" x-text="record.date"></p>
+                            </div>
+                        </template>
+                        <div x-show="records.length === 0" class="text-stone-300 text-sm text-center py-4">
+                            暂无记录
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        function appData() {
+            return {
+                currentView: 'home', // home, breathing, observing, scanning
+                showStatsModal: false,
+                isPlaying: false,
+                isDissipating: false,
+                thoughtInput: '',
+                currentQuote: '你不是你的思想，你是思想背后的观察者。',
+                quotes: [
+                    '你不是你的思想，你是思想背后的观察者。',
+                    '当下的时刻是你所拥有的唯一时刻。',
+                    '接纳，然后行动。',
+                    '生命即是舞者，也是舞蹈。'
+                ],
+                records: [
+                    { id: 1, content: '担心明天的会议会出错', date: '昨天 20:30' },
+                    { id: 2, content: '觉得同事刚才的眼神不对', date: '周二 14:15' }
+                ],
+
+                startBreathing() {
+                    this.currentQuote = this.quotes[Math.floor(Math.random() * this.quotes.length)];
+                    this.currentView = 'breathing';
+                },
+
+                startObserving() {
+                    this.thoughtInput = '';
+                    this.isDissipating = false;
+                    this.currentView = 'observing';
+                },
+
+                releaseThought() {
+                    if (!this.thoughtInput.trim()) return;
+
+                    // 添加到记录
+                    const now = new Date();
+                    this.records.unshift({
+                        id: Date.now(),
+                        content: this.thoughtInput,
+                        date: `今天 ${now.getHours()}:${now.getMinutes().toString().padStart(2, '0')}`
+                    });
+
+                    // 触发动画
+                    this.isDissipating = true;
+
+                    // 动画结束后返回首页
+                    setTimeout(() => {
+                        this.currentView = 'home';
+                        this.thoughtInput = '';
+                        this.isDissipating = false;
+                    }, 2000);
+                },
+
+                startScanning() {
+                    this.currentView = 'scanning';
+                },
+
+                showStats() {
+                    this.showStatsModal = true;
+                }
+            }
+        }
+    </script>
+</body>
+
+</html>
