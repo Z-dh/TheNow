@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport"
-        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+        content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
     <title>当下 - The Now</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
@@ -13,6 +13,8 @@
 
         html {
             height: 100%;
+            touch-action: manipulation;
+            -webkit-text-size-adjust: 100%;
         }
 
         body {
@@ -22,6 +24,7 @@
             color: #4A4A4A;
             /* 岩石灰 */
             -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
             min-height: 100%;
             min-height: 100dvh;
             min-height: -webkit-fill-available;
@@ -48,6 +51,8 @@
 
         .breathing-circle {
             animation: breathe 8s infinite ease-in-out;
+            transform-origin: center center;
+            border-radius: 9999px;
         }
 
         /* 念头消散动画 */
@@ -130,19 +135,23 @@
 
         <!-- 2. 呼吸页面 -->
         <div x-show="currentView === 'breathing'" x-transition.opacity.duration.700ms
-            class="absolute inset-0 bg-[#E8E8E3] flex flex-col items-center justify-center z-20">
-            <div class="relative w-64 h-64 flex items-center justify-center">
-                <!-- 呼吸光圈 -->
-                <div class="absolute inset-0 bg-stone-400 rounded-full opacity-30 breathing-circle"></div>
-                <div class="absolute inset-4 bg-stone-300 rounded-full opacity-30 breathing-circle"
+            class="absolute inset-0 bg-[#E8E8E3] flex flex-col items-center justify-center z-20 px-4">
+            <!-- 宽高同一表达式，避免 max-height 与 aspect-square 冲突导致非正方形 -->
+            <div
+                class="relative mx-auto shrink-0 w-[min(18rem,88vw)] aspect-square max-w-[88vw] overflow-visible">
+                <!-- 呼吸光圈（独立方形层，rounded-full 才是真圆） -->
+                <div class="absolute inset-0 bg-stone-400 opacity-30 breathing-circle"></div>
+                <div class="absolute inset-4 bg-stone-300 opacity-30 breathing-circle"
                     style="animation-delay: 0.5s"></div>
 
-                <!-- 金句 -->
-                <div class="relative z-10 text-center p-6">
-                    <p class="serif text-stone-700 text-lg leading-relaxed opacity-80" x-text="currentQuote"></p>
+                <!-- 金句叠在圆上，不参与撑开 flex 尺寸 -->
+                <div class="absolute inset-0 z-10 flex items-center justify-center px-4 py-5">
+                    <p class="serif text-stone-700 text-[0.95rem] sm:text-lg leading-relaxed opacity-85 text-center max-w-[95%]"
+                        x-text="currentQuote"></p>
                 </div>
             </div>
-            <button @click="currentView = 'home'"
+            <p class="mt-6 text-[10px] text-stone-400/80 tracking-wide" x-show="quotes.length > 1">练习中会缓缓轮换句子</p>
+            <button @click="endBreathing()"
                 class="absolute bottom-12 text-stone-500 text-sm opacity-50">结束练习</button>
         </div>
 
@@ -180,52 +189,72 @@
         <!-- 4. 扫描页面 -->
         <div x-show="currentView === 'scanning'" x-transition.opacity.duration.500ms
             class="absolute inset-0 bg-[#4A4A4A] text-[#F5F5F0] flex flex-col items-center justify-center z-20">
-            <div class="mb-12 text-center opacity-80">
+            <div class="mb-12 text-center opacity-80 px-4">
                 <p class="serif text-2xl mb-2">身体扫描</p>
                 <p class="text-sm font-light">将注意力带回身体</p>
+                <p class="text-[11px] text-white/35 mt-3 leading-relaxed max-w-xs mx-auto">
+                    舒缓棕噪与极低音量底色音（浏览器本地合成，无需联网）</p>
             </div>
 
-            <!-- 极简播放器 -->
-            <button @click="isPlaying = !isPlaying"
-                class="w-24 h-24 rounded-full border border-[#F5F5F0]/30 flex items-center justify-center hover:bg-[#F5F5F0]/10 transition-colors">
-                <svg x-show="!isPlaying" xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 ml-1" fill="none"
-                    viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
-                        d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
-                        d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <svg x-show="isPlaying" xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none"
-                    viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
-                        d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
+            <!-- 极简播放器（固定图标占位，避免播放/暂停切换时跳动） -->
+            <button type="button" @click="toggleScanPlayback()" :disabled="!scanAudioUsable"
+                class="w-24 h-24 rounded-full border border-[#F5F5F0]/30 flex items-center justify-center hover:bg-[#F5F5F0]/10 transition-colors disabled:opacity-35 disabled:pointer-events-none">
+                <span class="relative grid h-8 w-8 shrink-0 place-items-center" aria-hidden="true">
+                    <svg x-show="!isPlaying" xmlns="http://www.w3.org/2000/svg"
+                        class="col-start-1 row-start-1 h-8 w-8" fill="none" viewBox="0 0 24 24"
+                        stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
+                            d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
+                            d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <svg x-show="isPlaying" xmlns="http://www.w3.org/2000/svg"
+                        class="col-start-1 row-start-1 h-8 w-8" fill="none" viewBox="0 0 24 24"
+                        stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
+                            d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                </span>
             </button>
-            <p class="mt-8 text-xs opacity-40" x-text="isPlaying ? '正在感受当下...' : '点击播放'"></p>
+            <p class="mt-8 text-xs opacity-40 px-4 text-center"
+                x-text="isPlaying ? '正在播放环境音…' : (scanAudioUsable ? '点击播放' : '当前环境无法播放音频')"></p>
 
-            <button @click="currentView = 'home'; isPlaying=false"
+            <button type="button" @click="leaveScanning()"
                 class="absolute bottom-12 text-white/30 text-sm">关闭</button>
         </div>
 
-        <!-- 5. 统计页面 (底部抽屉) -->
+        <!-- 5. 统计页面 (底部抽屉，顶部灰条可下拖关闭） -->
         <div x-show="showStatsModal" style="display: none;" class="absolute inset-0 z-30 flex items-end">
-            <div @click="showStatsModal = false" class="absolute inset-0 bg-black/20 backdrop-blur-sm"></div>
-            <div x-transition:enter="transition ease-out duration-300" x-transition:enter-start="translate-y-full"
-                x-transition:enter-end="translate-y-0"
-                class="bg-white w-full rounded-t-2xl px-8 pt-8 pb-[max(2rem,calc(env(safe-area-inset-bottom,0px)+1.5rem))] relative z-10 shadow-2xl">
-                <div class="w-12 h-1 bg-stone-200 rounded-full mx-auto mb-8"></div>
+            <div @click="closeStatsModal()" class="absolute inset-0 bg-black/20 backdrop-blur-sm"></div>
+            <div x-ref="statsSheetPanel" x-transition:enter="transition ease-out duration-300"
+                x-transition:enter-start="translate-y-full" x-transition:enter-end="translate-y-0"
+                class="bg-white w-full rounded-t-2xl relative z-10 shadow-2xl translate-y-0 ease-out will-change-transform"
+                :class="statsSheetDragging ? 'transition-none' : 'transition-transform duration-300'"
+                :style="statsSheetDragStyle()">
+                <!-- 拖拽手柄（抖音评论区式下滑关闭） -->
+                <div x-ref="statsSheetHandle"
+                    class="touch-none select-none cursor-grab active:cursor-grabbing shrink-0 px-8 pt-3 pb-2 -mt-1"
+                    @pointerdown="statsSheetPointerDown($event)" @pointermove="statsSheetPointerMove($event)"
+                    @pointerup="statsSheetPointerUp($event)" @pointercancel="statsSheetPointerUp($event)">
+                    <div class="w-12 h-1 bg-stone-200 rounded-full mx-auto pointer-events-none" aria-hidden="true">
+                    </div>
+                    <span class="sr-only">向下拖动关闭</span>
+                </div>
 
+                <div class="px-8 pt-4 pb-[max(2rem,calc(env(safe-area-inset-bottom,0px)+1.5rem))]">
                 <h3 class="serif text-xl text-stone-700 mb-6">本周回顾</h3>
 
                 <div class="mb-8">
-                    <p class="text-stone-400 text-sm mb-2">过去7天，你回到了当下</p>
-                    <p class="text-5xl font-light text-stone-600">7 <span class="text-lg text-stone-400">次</span></p>
+                    <p class="text-stone-400 text-sm mb-2">过去7天，你写下了观察记录</p>
+                    <p class="text-5xl font-light text-stone-600"><span
+                            x-text="observeCountLast7Days()"></span> <span
+                            class="text-lg text-stone-400">次</span></p>
                 </div>
 
                 <div class="border-t border-stone-100 pt-6">
-                    <p class="text-stone-400 text-sm mb-4">观察记录</p>
+                    <p class="text-stone-400 text-sm mb-4">观察记录（近7天）</p>
                     <div class="space-y-4 max-h-48 overflow-y-auto no-scrollbar">
-                        <template x-for="record in records" :key="record.id">
+                        <template x-for="record in recordsLast7Days()" :key="record.id">
                             <div class="bg-stone-50 p-4 rounded-lg">
                                 <p class="text-stone-600 text-sm" x-text="record.content"></p>
                                 <p class="text-stone-300 text-xs mt-2" x-text="record.date"></p>
@@ -234,7 +263,12 @@
                         <div x-show="records.length === 0" class="text-stone-300 text-sm text-center py-4">
                             暂无记录
                         </div>
+                        <div x-show="records.length > 0 && recordsLast7Days().length === 0"
+                            class="text-stone-300 text-sm text-center py-4">
+                            近7天暂无记录
+                        </div>
                     </div>
+                </div>
                 </div>
             </div>
         </div>
@@ -242,28 +276,191 @@
     </div>
 
     <script>
+        /** 扫描页：棕噪声 + 轻柔双音底色（Web Audio 本地合成） */
+        function createScanAmbientSession() {
+            const AC = window.AudioContext || window.webkitAudioContext;
+            if (!AC) return null;
+
+            const ctx = new AC();
+            const masterGain = ctx.createGain();
+            masterGain.connect(ctx.destination);
+
+            const seconds = 14;
+            const sampleRate = ctx.sampleRate;
+            const frames = Math.floor(sampleRate * seconds);
+            const buffer = ctx.createBuffer(1, frames, sampleRate);
+            const ch = buffer.getChannelData(0);
+            let brown = 0;
+            for (let i = 0; i < frames; i++) {
+                const white = Math.random() * 2 - 1;
+                brown = (brown + 0.02 * white) / 1.02;
+                ch[i] = brown * 1.85;
+            }
+
+            const noiseSrc = ctx.createBufferSource();
+            noiseSrc.buffer = buffer;
+            noiseSrc.loop = true;
+
+            const lowpass = ctx.createBiquadFilter();
+            lowpass.type = 'lowpass';
+            lowpass.frequency.value = 780;
+            lowpass.Q.value = 0.45;
+
+            const noiseGain = ctx.createGain();
+            noiseGain.gain.value = 0.48;
+            noiseSrc.connect(lowpass).connect(noiseGain).connect(masterGain);
+
+            const oscA = ctx.createOscillator();
+            const oscB = ctx.createOscillator();
+            oscA.type = 'sine';
+            oscB.type = 'sine';
+            oscA.frequency.value = 147;
+            oscB.frequency.value = 149.6;
+            const droneGain = ctx.createGain();
+            droneGain.gain.value = 0.02;
+            oscA.connect(droneGain);
+            oscB.connect(droneGain);
+            droneGain.connect(masterGain);
+
+            noiseSrc.start(0);
+            oscA.start(0);
+            oscB.start(0);
+
+            return {
+                ctx,
+                masterGain,
+                noiseSrc,
+                oscA,
+                oscB,
+                lowpass,
+                noiseGain,
+                droneGain,
+                targetMaster: 0.46
+            };
+        }
+
         function appData() {
+            const STORAGE_KEY = 'thenow.observationRecords';
+
+            function loadRecords() {
+                try {
+                    const raw = localStorage.getItem(STORAGE_KEY);
+                    if (!raw) return [];
+                    const parsed = JSON.parse(raw);
+                    return Array.isArray(parsed) ? parsed : [];
+                } catch (e) {
+                    return [];
+                }
+            }
+
+            function persistRecords(records) {
+                try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+                } catch (e) {
+                    console.warn('TheNow: 无法保存本地记录', e);
+                }
+            }
+
             return {
                 currentView: 'home', // home, breathing, observing, scanning
                 showStatsModal: false,
+                statsSheetDragY: 0,
+                statsSheetDragging: false,
+                _statsSheetPtrId: null,
+                _statsSheetStartY: 0,
+                _statsSheetStartOffset: 0,
+                _statsSheetLastY: 0,
+                _statsSheetLastT: 0,
+                _statsSheetVy: 0,
                 isPlaying: false,
+                scanAudioUsable: !!(window.AudioContext || window.webkitAudioContext),
+                _scanSession: null,
                 isDissipating: false,
                 thoughtInput: '',
-                currentQuote: '你不是你的思想，你是思想背后的观察者。',
+                currentQuote: '你不是你的头脑；你是那份觉知。',
+                /** 灵感来自《当下的力量》主题，措辞为便于练习的短句 */
                 quotes: [
-                    '你不是你的思想，你是思想背后的观察者。',
-                    '当下的时刻是你所拥有的唯一时刻。',
-                    '接纳，然后行动。',
-                    '生命即是舞者，也是舞蹈。'
+                    '你不是你的头脑；你是那份觉知。',
+                    '在这一呼一吸之间，不需要去哪里，此刻已经足够。',
+                    '留意念头，但不必跟进每一个故事。',
+                    '接纳此刻如实的样子，改变由此才可能发生。',
+                    '心理时间把人拽离当下；钟表时间只做事务安排就好。',
+                    '抗拒内在实相时，痛苦会放大；先允许它在那里。',
+                    '感受身体内部的细微生气：手、胸腹、脚底。',
+                    '临在不是念头里的概念，是身体里活生生的警觉。',
+                    '观察「心里的噪声」，不必认同其中的任何一个声音。',
+                    '小我靠过去的怨恨与未来的焦虑喂养自己；你可以不必喂它。',
+                    '每一次有意识地吸气，都是在对自己说：我在这里。',
+                    '宁静不在别处，当你不再逃离此刻，它就会出现。',
+                    '把注意力从「问题」拉回「此刻的体验」，答案常常自然松动。',
+                    '不必消灭情绪；只需在场，让它被看见、被容纳。',
+                    '真正的行动往往来自清醒的寂静，而不是慌张的反应。',
+                    '你是天空，念头与情绪是来去的风云。',
+                    '对生活说是，并不等于软弱；它是与实相结盟的起点。',
+                    '当你全然在此，思考会变清晰，也不会再把恐惧当成全部的你。',
+                    '放下「非得立刻弄明白」的催促；有时候，待在未知里就是修行。',
+                    '每一次呼气，允许肩颈再松一点点。',
+                    '你不是过去的伤痛总和；那份觉知本身从未受伤。',
+                    '不必审判这一刻好不好；评判本身会把你从当下带走。',
+                    '当心智安静下来，你会触碰更深层的生命感——无需言语。',
+                    '保持温和的好奇：此刻身体里，哪里最柔软、最容易安顿？',
+                    '臣服不是认输，是停止用念头击打现实这面墙。',
+                    '当下是唯一你能真正活着、真正接触生命的入口。',
+                    '呼吸是你随时可回的锚点；它一直都在等你记起。',
+                    '少一个字也好：此刻，我在这里。',
+                    '让这一刻成为你练习的唯一对象；其余留给呼气之后再想。',
+                    '当你不再与当下争辩，精力会回到身体里，而不是耗在故事里。'
                 ],
-                records: [
-                    { id: 1, content: '担心明天的会议会出错', date: '昨天 20:30' },
-                    { id: 2, content: '觉得同事刚才的眼神不对', date: '周二 14:15' }
-                ],
+                records: loadRecords(),
+
+                /** 用于「近7天」：优先 savedAt，旧数据用 id（曾为 Date.now） */
+                recordTimestamp(r) {
+                    if (r && typeof r.savedAt === 'number') return r.savedAt;
+                    if (r && typeof r.id === 'number') return r.id;
+                    return 0;
+                },
+
+                recordsLast7Days() {
+                    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+                    return this.records.filter((r) => this.recordTimestamp(r) >= cutoff);
+                },
+
+                observeCountLast7Days() {
+                    return this.recordsLast7Days().length;
+                },
+
+                breathingQuoteTimerId: null,
+
+                pickBreathingQuote() {
+                    const qs = this.quotes;
+                    if (!qs.length) return;
+                    let next = qs[Math.floor(Math.random() * qs.length)];
+                    if (qs.length > 1) {
+                        while (next === this.currentQuote) {
+                            next = qs[Math.floor(Math.random() * qs.length)];
+                        }
+                    }
+                    this.currentQuote = next;
+                },
+
+                stopBreathingQuoteRotation() {
+                    if (this.breathingQuoteTimerId != null) {
+                        clearInterval(this.breathingQuoteTimerId);
+                        this.breathingQuoteTimerId = null;
+                    }
+                },
 
                 startBreathing() {
-                    this.currentQuote = this.quotes[Math.floor(Math.random() * this.quotes.length)];
+                    this.stopBreathingQuoteRotation();
+                    this.pickBreathingQuote();
                     this.currentView = 'breathing';
+                    const rotateMs = 48000;
+                    this.breathingQuoteTimerId = setInterval(() => this.pickBreathingQuote(), rotateMs);
+                },
+
+                endBreathing() {
+                    this.stopBreathingQuoteRotation();
+                    this.currentView = 'home';
                 },
 
                 startObserving() {
@@ -277,11 +474,14 @@
 
                     // 添加到记录
                     const now = new Date();
+                    const ts = Date.now();
                     this.records.unshift({
-                        id: Date.now(),
+                        id: ts,
+                        savedAt: ts,
                         content: this.thoughtInput,
                         date: `今天 ${now.getHours()}:${now.getMinutes().toString().padStart(2, '0')}`
                     });
+                    persistRecords(this.records);
 
                     // 触发动画
                     this.isDissipating = true;
@@ -294,15 +494,188 @@
                     }, 2000);
                 },
 
+                async stopScanAudio() {
+                    const s = this._scanSession;
+                    if (!s) return;
+                    this._scanSession = null;
+                    const ctx = s.ctx;
+                    const g = s.masterGain;
+                    const t = ctx.currentTime;
+                    try {
+                        g.gain.cancelScheduledValues(t);
+                        g.gain.setValueAtTime(Math.min(Math.max(g.gain.value, 0), 1), t);
+                        g.gain.linearRampToValueAtTime(0, t + 0.55);
+                    } catch (e) { /* noop */ }
+                    await new Promise((r) => setTimeout(r, 600));
+                    try {
+                        s.noiseSrc.stop();
+                    } catch (e) { /* noop */ }
+                    try {
+                        s.oscA.stop();
+                    } catch (e) { /* noop */ }
+                    try {
+                        s.oscB.stop();
+                    } catch (e) { /* noop */ }
+                    try {
+                        s.noiseSrc.disconnect();
+                        s.lowpass.disconnect();
+                        s.noiseGain.disconnect();
+                        s.oscA.disconnect();
+                        s.oscB.disconnect();
+                        s.droneGain.disconnect();
+                        g.disconnect();
+                    } catch (e) { /* noop */ }
+                    try {
+                        await ctx.close();
+                    } catch (e) { /* noop */ }
+                },
+
+                async startScanAudio() {
+                    if (!this.scanAudioUsable) return;
+                    await this.stopScanAudio();
+                    let session;
+                    try {
+                        session = createScanAmbientSession();
+                    } catch (e) {
+                        console.warn('TheNow: 扫描音效初始化失败', e);
+                        return;
+                    }
+                    if (!session) return;
+                    this._scanSession = session;
+                    const ctx = session.ctx;
+                    if (ctx.state === 'suspended') {
+                        try {
+                            await ctx.resume();
+                        } catch (e) {
+                            console.warn('TheNow: AudioContext 未解锁', e);
+                            this._scanSession = null;
+                            try {
+                                await ctx.close();
+                            } catch (e2) { /* noop */ }
+                            return;
+                        }
+                    }
+                    const now = ctx.currentTime;
+                    session.masterGain.gain.setValueAtTime(0, now);
+                    session.masterGain.gain.linearRampToValueAtTime(session.targetMaster, now + 1.05);
+                },
+
+                async toggleScanPlayback() {
+                    if (!this.scanAudioUsable) return;
+                    if (this.isPlaying) {
+                        this.isPlaying = false;
+                        await this.stopScanAudio();
+                        return;
+                    }
+                    this.isPlaying = true;
+                    await this.startScanAudio();
+                    if (!this._scanSession) this.isPlaying = false;
+                },
+
+                async leaveScanning() {
+                    this.isPlaying = false;
+                    await this.stopScanAudio();
+                    this.currentView = 'home';
+                },
+
                 startScanning() {
+                    void this.stopScanAudio();
+                    this.isPlaying = false;
                     this.currentView = 'scanning';
                 },
 
                 showStats() {
+                    this.statsSheetDragY = 0;
+                    this.statsSheetDragging = false;
+                    this._statsSheetPtrId = null;
                     this.showStatsModal = true;
+                },
+
+                closeStatsModal() {
+                    this.showStatsModal = false;
+                    this.statsSheetDragY = 0;
+                    this.statsSheetDragging = false;
+                    this._statsSheetPtrId = null;
+                },
+
+                statsSheetDragStyle() {
+                    const y = this.statsSheetDragY;
+                    if (y <= 0) return '';
+                    return 'transform: translateY(' + y + 'px)';
+                },
+
+                statsSheetPointerDown(e) {
+                    if (!this.showStatsModal) return;
+                    if (e.pointerType === 'mouse' && e.button !== 0) return;
+                    this.statsSheetDragging = true;
+                    this._statsSheetPtrId = e.pointerId;
+                    this._statsSheetStartY = e.clientY;
+                    this._statsSheetStartOffset = this.statsSheetDragY;
+                    this._statsSheetLastY = e.clientY;
+                    this._statsSheetLastT = performance.now();
+                    this._statsSheetVy = 0;
+                    try {
+                        this.$refs.statsSheetHandle.setPointerCapture(e.pointerId);
+                    } catch (err) { /* noop */ }
+                },
+
+                statsSheetPointerMove(e) {
+                    if (!this.statsSheetDragging || e.pointerId !== this._statsSheetPtrId) return;
+                    const dy = e.clientY - this._statsSheetStartY;
+                    let next = this._statsSheetStartOffset + dy;
+                    if (next < 0) next = 0;
+                    this.statsSheetDragY = next;
+                    const now = performance.now();
+                    const dt = Math.max(now - this._statsSheetLastT, 1);
+                    this._statsSheetVy = (e.clientY - this._statsSheetLastY) / dt;
+                    this._statsSheetLastY = e.clientY;
+                    this._statsSheetLastT = now;
+                },
+
+                statsSheetPointerUp(e) {
+                    if (e.pointerId !== this._statsSheetPtrId) return;
+                    this.statsSheetDragging = false;
+                    try {
+                        this.$refs.statsSheetHandle.releasePointerCapture(e.pointerId);
+                    } catch (err) { /* noop */ }
+                    this._statsSheetPtrId = null;
+
+                    const y = this.statsSheetDragY;
+                    const threshold = Math.min(132, window.innerHeight * 0.22);
+                    const dismiss = y > threshold || this._statsSheetVy > 0.5;
+
+                    if (dismiss) this.statsSheetAnimateDismiss();
+                    else {
+                        requestAnimationFrame(() => {
+                            this.statsSheetDragY = 0;
+                        });
+                    }
+                },
+
+                statsSheetAnimateDismiss() {
+                    const el = this.$refs.statsSheetPanel;
+                    const h = el ? el.getBoundingClientRect().height + 56 : window.innerHeight;
+                    this.statsSheetDragging = false;
+                    requestAnimationFrame(() => {
+                        this.statsSheetDragY = h;
+                        window.setTimeout(() => {
+                            this.showStatsModal = false;
+                            this.statsSheetDragY = 0;
+                        }, 300);
+                    });
                 }
             }
         }
+    </script>
+    <script>
+        (function () {
+            function blockZoom(e) {
+                e.preventDefault();
+            }
+            document.addEventListener('gesturestart', blockZoom, { passive: false });
+            document.addEventListener('gesturechange', blockZoom, { passive: false });
+            document.addEventListener('gestureend', blockZoom, { passive: false });
+        })();
     </script>
 </body>
 
