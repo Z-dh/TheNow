@@ -198,7 +198,7 @@
                 <p class="serif text-2xl mb-2">身体扫描</p>
                 <p class="text-sm font-light">将注意力带回身体</p>
                 <p class="text-[11px] text-white/35 mt-3 leading-relaxed max-w-xs mx-auto">
-                    舒缓棕噪与极低音量底色音（浏览器本地合成，无需联网）</p>
+                    棕噪声本地生成，无需联网。微信内走媒体播放，请调高音量并关闭静音模式。</p>
             </div>
 
             <!-- 极简播放器（固定图标占位，避免播放/暂停切换时跳动） -->
@@ -344,6 +344,53 @@
             };
         }
 
+        function writeWavString(view, offset, str) {
+            for (let i = 0; i < str.length; i++) {
+                view.setUint8(offset + i, str.charCodeAt(i));
+            }
+        }
+
+        /** 单声道 16-bit PCM WAV（微信内 Web Audio 常不可用，用 audio 元素播 blob 更稳） */
+        function encodeMonoWav16(pcm16, sampleRate) {
+            const n = pcm16.length;
+            const buf = new ArrayBuffer(44 + n * 2);
+            const view = new DataView(buf);
+            writeWavString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + n * 2, true);
+            writeWavString(view, 8, 'WAVE');
+            writeWavString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeWavString(view, 36, 'data');
+            view.setUint32(40, n * 2, true);
+            let o = 44;
+            for (let i = 0; i < n; i++) {
+                view.setInt16(o, pcm16[i], true);
+                o += 2;
+            }
+            return buf;
+        }
+
+        function generateBrownNoiseInt16(durationSec, sampleRate) {
+            const frames = Math.floor(durationSec * sampleRate);
+            const pcm = new Int16Array(frames);
+            let brown = 0;
+            for (let i = 0; i < frames; i++) {
+                const white = Math.random() * 2 - 1;
+                brown = (brown + 0.02 * white) / 1.02;
+                let x = brown * 2.35;
+                if (x > 1) x = 1;
+                if (x < -1) x = -1;
+                pcm[i] = x < 0 ? x * 32768 : x * 32767;
+            }
+            return pcm;
+        }
+
         function appData() {
             const STORAGE_KEY = 'thenow.observationRecords';
 
@@ -378,8 +425,11 @@
                 _statsSheetLastT: 0,
                 _statsSheetVy: 0,
                 isPlaying: false,
-                scanAudioUsable: !!(window.AudioContext || window.webkitAudioContext),
+                scanAudioUsable: !!(window.AudioContext || window.webkitAudioContext || typeof Audio !== 'undefined'),
                 _scanSession: null,
+                _scanHtmlAudio: null,
+                _scanHtmlObjectUrl: null,
+                _scanHtmlAttemptGen: 0,
                 isDissipating: false,
                 thoughtInput: '',
                 currentQuote: '你不是你的头脑；你是那份觉知。',
@@ -499,7 +549,25 @@
                     }, 2000);
                 },
 
+                stopScanHtmlNoiseOnly() {
+                    if (this._scanHtmlAudio) {
+                        try {
+                            this._scanHtmlAudio.pause();
+                            this._scanHtmlAudio.removeAttribute('src');
+                            this._scanHtmlAudio.load();
+                        } catch (e) { /* noop */ }
+                        this._scanHtmlAudio = null;
+                    }
+                    if (this._scanHtmlObjectUrl) {
+                        try {
+                            URL.revokeObjectURL(this._scanHtmlObjectUrl);
+                        } catch (e) { /* noop */ }
+                        this._scanHtmlObjectUrl = null;
+                    }
+                },
+
                 async stopScanAudio() {
+                    this.stopScanHtmlNoiseOnly();
                     const s = this._scanSession;
                     if (!s) return;
                     this._scanSession = null;
@@ -537,6 +605,7 @@
 
                 /** 立即拆掉当前 Web Audio 会话（不停顿）；用于「播放」手势内，避免 await 导致微信无法出声 */
                 stopScanAudioSyncTeardown() {
+                    this.stopScanHtmlNoiseOnly();
                     const s = this._scanSession;
                     if (!s) return;
                     this._scanSession = null;
@@ -562,10 +631,91 @@
                     } catch (e) { /* noop */ }
                 },
 
-                /** 微信 / 部分 WebView：resume 必须在点击的同步栈里调用，不能用 await 打断手势链 */
+                /**
+                 * 微信内 Web Audio 常被禁用或无法解锁；改用 <audio> + WAV blob（棕噪循环）。
+                 * iOS 微信常用 WeixinJSBridge.invoke('getNetworkType') 解锁媒体播放。
+                 */
+                startScanHtmlBrownNoiseFromGesture() {
+                    if (typeof Audio === 'undefined') return;
+                    this.stopScanHtmlNoiseOnly();
+
+                    const sr = 22050;
+                    const sec = 14;
+                    let wav;
+                    try {
+                        const pcm = generateBrownNoiseInt16(sec, sr);
+                        wav = encodeMonoWav16(pcm, sr);
+                    } catch (e) {
+                        console.warn('TheNow: 生成 WAV 失败', e);
+                        return;
+                    }
+
+                    const blob = new Blob([wav], { type: 'audio/wav' });
+                    const url = URL.createObjectURL(blob);
+
+                    const audio = new Audio();
+                    audio.src = url;
+                    audio.loop = true;
+                    audio.preload = 'auto';
+                    audio.volume = 1;
+                    audio.setAttribute('playsinline', 'true');
+                    audio.setAttribute('webkit-playsinline', 'true');
+                    audio.setAttribute('x5-playsinline', 'true');
+
+                    this._scanHtmlAudio = audio;
+                    this._scanHtmlObjectUrl = url;
+
+                    try {
+                        const pr = audio.play();
+                        if (pr && typeof pr.then === 'function') {
+                            pr.catch(() => {});
+                        }
+                    } catch (e) { /* noop */ }
+                },
+
+                scheduleWeixinHtmlNoiseKick() {
+                    const gen = ++this._scanHtmlAttemptGen;
+                    const tryKick = () => {
+                        if (!this.isPlaying || gen !== this._scanHtmlAttemptGen) return;
+                        if (this._scanHtmlAudio && !this._scanHtmlAudio.paused) return;
+                        this.startScanHtmlBrownNoiseFromGesture();
+                    };
+
+                    try {
+                        if (typeof WeixinJSBridge !== 'undefined') {
+                            WeixinJSBridge.invoke('getNetworkType', {}, tryKick);
+                        }
+                    } catch (e) {
+                        tryKick();
+                    }
+
+                    document.addEventListener(
+                        'WeixinJSBridgeReady',
+                        function onBridge() {
+                            try {
+                                WeixinJSBridge.invoke('getNetworkType', {}, tryKick);
+                            } catch (e) {
+                                tryKick();
+                            }
+                        },
+                        { once: true }
+                    );
+
+                    tryKick();
+                    window.setTimeout(tryKick, 50);
+                    window.setTimeout(tryKick, 200);
+                },
+
+                /** 非微信：Web Audio；微信：<audio> blob（不走 AudioContext） */
                 startScanAudioFromGesture() {
                     if (!this.scanAudioUsable) return;
                     this.stopScanAudioSyncTeardown();
+
+                    const wx = /MicroMessenger/i.test(navigator.userAgent || '');
+                    if (wx) {
+                        this.scheduleWeixinHtmlNoiseKick();
+                        return;
+                    }
 
                     let session;
                     try {
@@ -584,13 +734,6 @@
                         if (pr && typeof pr.then === 'function') pr.catch(() => {});
                     } catch (e) { /* noop */ }
 
-                    const wx = /MicroMessenger/i.test(navigator.userAgent || '');
-                    if (wx) {
-                        try {
-                            void ctx.resume();
-                        } catch (e) { /* noop */ }
-                    }
-
                     const now = ctx.currentTime;
                     session.masterGain.gain.setValueAtTime(0, now);
                     session.masterGain.gain.linearRampToValueAtTime(session.targetMaster, now + 1.05);
@@ -603,13 +746,6 @@
                             }
                         } catch (e) { /* noop */ }
                     });
-                    if (wx) {
-                        window.setTimeout(() => {
-                            try {
-                                if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
-                            } catch (e) { /* noop */ }
-                        }, 30);
-                    }
                 },
 
                 async toggleScanPlayback() {
@@ -621,9 +757,11 @@
                     }
                     this.isPlaying = true;
                     this.startScanAudioFromGesture();
-                    queueMicrotask(() => {
-                        if (!this._scanSession) this.isPlaying = false;
-                    });
+                    window.setTimeout(() => {
+                        if (!this.isPlaying) return;
+                        const ok = this._scanSession || (this._scanHtmlAudio && !this._scanHtmlAudio.paused);
+                        if (!ok) this.isPlaying = false;
+                    }, 420);
                 },
 
                 async leaveScanning() {
