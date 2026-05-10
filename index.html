@@ -13,6 +13,8 @@
 
         html {
             height: 100%;
+            overflow: hidden;
+            overscroll-behavior: none;
             touch-action: manipulation;
             -webkit-text-size-adjust: 100%;
         }
@@ -25,9 +27,12 @@
             /* 岩石灰 */
             -webkit-tap-highlight-color: transparent;
             touch-action: manipulation;
-            min-height: 100%;
-            min-height: 100dvh;
-            min-height: -webkit-fill-available;
+            height: 100%;
+            height: 100dvh;
+            max-height: 100dvh;
+            max-height: -webkit-fill-available;
+            overflow: hidden;
+            overscroll-behavior: none;
         }
 
         .serif {
@@ -91,12 +96,12 @@
     </style>
 </head>
 
-<body class="min-h-[100dvh] min-h-screen w-full overflow-x-hidden overflow-y-auto flex justify-center bg-stone-100 safe-area-pb"
+<body class="h-[100dvh] max-h-[100dvh] w-full overflow-hidden flex justify-center bg-stone-100 safe-area-pb"
         x-data="appData()">
 
-    <!-- 手机容器模拟 -->
+    <!-- 手机容器模拟：锁定一屏高度，避免整页上下拖动（记录仅在抽屉内滚动） -->
     <div
-        class="w-full min-h-[100dvh] min-h-screen max-w-md bg-[#F5F5F0] relative flex flex-col shadow-2xl overflow-x-hidden overflow-y-auto sm:overflow-hidden sm:rounded-xl sm:h-[90vh] sm:min-h-0 sm:my-auto">
+        class="w-full h-[100dvh] max-h-[100dvh] max-w-md bg-[#F5F5F0] relative flex flex-col shadow-2xl overflow-hidden sm:rounded-xl sm:h-[90vh] sm:max-h-[90vh] sm:my-auto">
 
         <!-- 1. 首页 -->
         <div x-show="currentView === 'home'" x-transition.opacity.duration.500ms
@@ -163,9 +168,9 @@
                 <p class="text-stone-400 text-xs mt-2">只是写下来，然后释放它</p>
             </div>
 
-            <div class="flex-1 relative">
+            <div class="flex-1 relative min-h-0">
                 <textarea x-model="thoughtInput" :class="{'dissipating': isDissipating}"
-                    class="w-full h-full bg-transparent border-none resize-none focus:ring-0 text-stone-700 text-lg leading-relaxed placeholder-stone-300 outline-none"
+                    class="w-full h-full min-h-0 overflow-y-auto bg-transparent border-none resize-none focus:ring-0 text-stone-700 text-lg leading-relaxed placeholder-stone-300 outline-none"
                     placeholder="此刻你的脑海里有什么？"></textarea>
             </div>
 
@@ -530,9 +535,38 @@
                     } catch (e) { /* noop */ }
                 },
 
-                async startScanAudio() {
+                /** 立即拆掉当前 Web Audio 会话（不停顿）；用于「播放」手势内，避免 await 导致微信无法出声 */
+                stopScanAudioSyncTeardown() {
+                    const s = this._scanSession;
+                    if (!s) return;
+                    this._scanSession = null;
+                    try {
+                        s.masterGain.gain.cancelScheduledValues(s.ctx.currentTime);
+                    } catch (e) { /* noop */ }
+                    try {
+                        s.noiseSrc.stop();
+                        s.oscA.stop();
+                        s.oscB.stop();
+                    } catch (e) { /* noop */ }
+                    try {
+                        s.noiseSrc.disconnect();
+                        s.lowpass.disconnect();
+                        s.noiseGain.disconnect();
+                        s.oscA.disconnect();
+                        s.oscB.disconnect();
+                        s.droneGain.disconnect();
+                        s.masterGain.disconnect();
+                    } catch (e) { /* noop */ }
+                    try {
+                        void s.ctx.close();
+                    } catch (e) { /* noop */ }
+                },
+
+                /** 微信 / 部分 WebView：resume 必须在点击的同步栈里调用，不能用 await 打断手势链 */
+                startScanAudioFromGesture() {
                     if (!this.scanAudioUsable) return;
-                    await this.stopScanAudio();
+                    this.stopScanAudioSyncTeardown();
+
                     let session;
                     try {
                         session = createScanAmbientSession();
@@ -541,23 +575,41 @@
                         return;
                     }
                     if (!session) return;
+
                     this._scanSession = session;
                     const ctx = session.ctx;
-                    if (ctx.state === 'suspended') {
+
+                    try {
+                        const pr = ctx.resume();
+                        if (pr && typeof pr.then === 'function') pr.catch(() => {});
+                    } catch (e) { /* noop */ }
+
+                    const wx = /MicroMessenger/i.test(navigator.userAgent || '');
+                    if (wx) {
                         try {
-                            await ctx.resume();
-                        } catch (e) {
-                            console.warn('TheNow: AudioContext 未解锁', e);
-                            this._scanSession = null;
-                            try {
-                                await ctx.close();
-                            } catch (e2) { /* noop */ }
-                            return;
-                        }
+                            void ctx.resume();
+                        } catch (e) { /* noop */ }
                     }
+
                     const now = ctx.currentTime;
                     session.masterGain.gain.setValueAtTime(0, now);
                     session.masterGain.gain.linearRampToValueAtTime(session.targetMaster, now + 1.05);
+
+                    requestAnimationFrame(() => {
+                        try {
+                            if (ctx.state === 'suspended') {
+                                const pr2 = ctx.resume();
+                                if (pr2 && typeof pr2.then === 'function') pr2.catch(() => {});
+                            }
+                        } catch (e) { /* noop */ }
+                    });
+                    if (wx) {
+                        window.setTimeout(() => {
+                            try {
+                                if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
+                            } catch (e) { /* noop */ }
+                        }, 30);
+                    }
                 },
 
                 async toggleScanPlayback() {
@@ -568,8 +620,10 @@
                         return;
                     }
                     this.isPlaying = true;
-                    await this.startScanAudio();
-                    if (!this._scanSession) this.isPlaying = false;
+                    this.startScanAudioFromGesture();
+                    queueMicrotask(() => {
+                        if (!this._scanSession) this.isPlaying = false;
+                    });
                 },
 
                 async leaveScanning() {
@@ -579,7 +633,7 @@
                 },
 
                 startScanning() {
-                    void this.stopScanAudio();
+                    this.stopScanAudioSyncTeardown();
                     this.isPlaying = false;
                     this.currentView = 'scanning';
                 },
